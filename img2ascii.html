@@ -1,0 +1,231 @@
+<!doctype html>
+<html>
+<head>
+    <title>img2ascii prototype</title>
+    <style>
+    body {text-align:center;}
+    table {display:inline-block;}
+    canvas {
+        border: 1px solid black;
+        box-shadow: 2px 2px 2px 2px #eeeeff;
+    }
+    </style>
+</head>
+<!--
+    Written in 2013 by Richard Wossal <richard@r-wos.org>
+
+    To the extent possible under law, the author has dedicated all copyright
+    and related and neighboring rights to this software to the public domain
+    worldwide. This software is distributed without any warranty. 
+
+    See http://creativecommons.org/publicdomain/zero/1.0/ details.
+-->
+<body>
+    <h1>img2ascii prototype</h1>
+    <p>Please use Chrome or Chromium.</p>
+    <table border="0">
+        <tr>
+            <td>
+                <label for="img-loader">Image File:</label>
+                <input type="file" id="img-loader" name="img-loader"/><br>
+                <small>(shouldn't exceed about 300x300px - it's very slow for big images)</small>
+            </td>
+            <td><canvas id="src-c" width="200" height="200"></canvas><br></td>
+        </tr>
+        <tr><td colspan="2">&darr; &darr; &darr; &darr; &darr;</td></tr>
+        <tr>
+            <td>
+                <label for="img-loader">threshold:</label>
+                <input type="range" name="threshold" id="threshold" min="0" max="255" value="127"
+                       onchange="update_bw()">
+            </td>
+            <td><canvas id="bw-c" width="200" height="200"></canvas><br></td>
+        </tr>
+        <tr><td colspan="2">&darr; &darr; &darr; &darr; &darr;</td></tr>
+        <tr>
+            <td>
+                text image<br>
+                fitness: <span id="fitness"></span>
+            </td>
+            <td><canvas id="c" width="200" height="200"></canvas></td>
+        </tr>
+        <tr><td colspan="2">&darr; &darr; &darr; &darr; &darr;</td></tr>
+        <tr>
+            <td>
+                <input type="button" onclick="get_snapshot()" value="get text snapshopt">
+            </td>
+            <td><textarea id="snapshot"></textarea></td>
+        </tr>
+    </table>
+    <script>
+    var LINE_HEIGHT = 9;
+
+    var SRC_C = document.getElementById("src-c");
+    var SRC_CTX = SRC_C.getContext("2d");
+    var BW_C = document.getElementById("bw-c");
+    var BW_CTX = BW_C.getContext("2d");
+    var C = document.getElementById("c");
+    var CTX = C.getContext("2d");
+
+    var IMG_LOADER = document.getElementById("img-loader");
+    IMG_LOADER.addEventListener('change', upload_img, false);
+
+    function upload_img(e) {
+        var reader = new FileReader();
+        reader.onload = function(event) {
+            var img = new Image();
+            img.onload = function() {
+                SRC_C.width  = img.width;
+                SRC_C.height = img.height;
+                BW_C.width  = img.width;
+                BW_C.height = img.height;
+                C.width  = img.width;
+                C.height = img.height;
+                SRC_CTX.drawImage(img, 0, 0);
+                update_bw();
+                main();
+            }
+            img.src = event.target.result;
+        }
+        reader.readAsDataURL(e.target.files[0]);     
+    }
+
+    function update_bw() {
+        var img = SRC_CTX.getImageData(0, 0, SRC_C.width, SRC_C.height);
+        var pix = img.data;
+        for (var i = 0; i < pix.length; i += 4) {
+            var lum = pix[i] * 0.3 + pix[i+1] * 0.59 + pix[i+2] * 0.11;
+            if (lum > document.getElementById("threshold").value)
+                lum = 255;
+            else
+                lum = 0;
+            pix[i  ] = lum;
+            pix[i+1] = lum;
+            pix[i+2] = lum;
+        }
+        BW_CTX.putImageData(img, 0, 0);
+    }
+
+    function rand_char() {
+        var chars = "         !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+        return chars[Math.floor(Math.random() * chars.length)];
+    }
+
+    function rand_line(seed) {
+        if (seed) {
+            // change random character
+            var key = Math.floor(Math.random() * seed.length);
+            var dim = CTX.measureText(s);
+            var s = seed;
+            var i = 0;
+            while (dim.width < C.width) {
+                s = s.substr(0, key) + rand_char() + s.substr(key + 1);
+                dim = CTX.measureText(s);
+                if (i++ > 100) break;
+            }
+            i = 0;
+            while (dim.width > C.width) {
+                s = s.substr(0, s.length-1);
+                dim = CTX.measureText(s);
+                if (i++ > 100) break;
+            }
+            return s;
+        } else {
+            var s = "";
+            do {
+                s += " "; //rand_char();
+                var dim = CTX.measureText(s);
+            } while (dim.width < C.width);
+            return s;
+        }
+    }
+
+    function line_fitness(line) {
+        var bw_img  = BW_CTX.getImageData(0, line*LINE_HEIGHT, BW_C.width, LINE_HEIGHT).data;
+        var txt_img =    CTX.getImageData(0, line*LINE_HEIGHT,    C.width, LINE_HEIGHT).data;
+        var accu = 0;
+        for (var i = 0; i < bw_img.length && i < txt_img.length; i+= 4) {
+            var bw_px  =  bw_img[i];
+            var txt_px = txt_img[i];
+            if ((bw_px > 127 && txt_px > 127) || (bw_px < 127 && txt_px < 127)) {
+                accu += 1;
+            } else {
+                accu -= 1;
+            }
+        }
+        return accu;
+    }
+
+    function draw_lines(lines) {
+        CTX.fillStyle = "#fff";
+        CTX.fillRect(0, 0, C.width, C.height);
+        CTX.fillStyle = "#000";
+        CTX.font = LINE_HEIGHT + "px monospace";
+        for (var i = 0; i < lines.length; i++) {
+            CTX.fillText(lines[i], 1, (i+1)*LINE_HEIGHT);
+        }
+    }
+
+    function fitness(lines) {
+        var fit = [];
+        for (var i = 0; i < lines.length; i++) {
+            fit.push(line_fitness(i));
+        }
+        return fit;
+    }
+
+    var LINES;
+
+    function main() {
+        var lines = [];
+        // initial lines
+        for (var full_height = 0, i = 0; full_height < C.height; i++, full_height += LINE_HEIGHT) {
+            var line = rand_line(false);
+            lines.push(line);
+        }
+        LINES = lines;
+        setInterval(
+            function() {
+                LINES = evolve(LINES);
+            }, 1);
+    }
+
+    function evolve(lines) {
+        draw_lines(lines);
+        var fit       = fitness(lines);
+        var new_lines = step(lines);
+        draw_lines(new_lines);
+        var new_fit   = fitness(new_lines);
+        // build new line array with the best of both
+        var out = [];
+        var complete_fitness = 0;
+        for (var i = 0; i < lines.length; i++) {
+            if (fit[i] > new_fit[i]) {
+                complete_fitness += fit[i];
+                out.push(lines[i]);
+            } else {
+                complete_fitness += new_fit[i];
+                out.push(new_lines[i]);
+            }
+        }
+        document.getElementById("fitness").innerHTML = complete_fitness;
+        return out;
+    }
+
+    function step(lines) {
+        var new_lines = []
+        for (var full_height = 0, i = 0; full_height < C.height; i++, full_height += LINE_HEIGHT) {
+            var line = rand_line(lines[i]);
+            new_lines.push(line);
+        }
+        return new_lines;
+    }
+
+    function get_snapshot() {
+        document.getElementById("snapshot").value = LINES.join("\n");
+
+    }
+    </script>
+</body>
+</html>
+
